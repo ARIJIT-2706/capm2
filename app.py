@@ -1,374 +1,397 @@
+# importing libraries
 import streamlit as st
+import pandas_datareader.data as web
+import datetime
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import datetime
-import matplotlib.pyplot as plt
-from datetime import date, timedelta
+import plotly.express as px
 
-# Set page configuration
+# Set page config
 st.set_page_config(
-    page_title="Investment Analysis Suite",
-    layout="wide"
+    page_title="Portfolio Returns Calculator",
+    page_icon="💼",
+    layout="wide",
 )
 
-# Custom CSS for professional color scheme - using financial blues and neutrals
+# Define professional color palette inspired by financial institutions
+# Using a palette of blue (trust/stability), green (growth), and gray (professionalism)
+COLOR_PRIMARY = "#0F3057"    # Dark blue - primary color
+COLOR_SECONDARY = "#00587A"  # Medium blue - secondary color
+COLOR_ACCENT = "#008891"     # Teal - accent color
+COLOR_TEXT_DARK = "#333333"  # Dark gray - for text
+PLOT_BG = "#F7F7F7"          # Light gray background for plots
+
+# Custom CSS to apply the color scheme
 st.markdown("""
 <style>
-    /* Main colors: Dark blue, lighter blue accent, and neutral gray */
-    :root {
-        --main-color: #0A3161;      /* Deep navy blue - primary */
-        --secondary-color: #1E5C97; /* Medium blue - secondary */
-        --neutral-color: #F0F3F5;   /* Light gray - background */
-        --text-color: #333333;      /* Dark gray - text */
+    .main {
+        background-color: #FFFFFF;
     }
-    
-    .stApp {
-        background-color: var(--neutral-color);
-        color: var(--text-color);
-    }
-    
-    .stButton button {
-        background-color: var(--main-color);
+    .stButton>button {
+        background-color: """ + COLOR_PRIMARY + """;
         color: white;
-        border-radius: 4px;
-        border: none;
-        padding: 8px 16px;
     }
-    
-    .stButton button:hover {
-        background-color: var(--secondary-color);
+    .stButton>button:hover {
+        background-color: """ + COLOR_SECONDARY + """;
+        color: white;
     }
-    
     h1, h2, h3 {
-        color: var(--main-color);
-        font-weight: 600;
+        color: """ + COLOR_PRIMARY + """;
     }
-    
-    .key-metric {
-        background-color: white;
-        border-left: 4px solid var(--main-color);
-        padding: 15px;
-        border-radius: 4px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin: 10px 0;
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
     }
-    
-    .info-box {
-        background-color: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 4px;
-        padding: 15px;
-        margin: 10px 0;
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #FFFFFF;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
     }
-    
-    .st-expander {
-        border-left: 2px solid var(--secondary-color);
-    }
-
-    /* Customize the sidebar */
-    .css-1d391kg {
-        background-color: white;
+    .stTabs [aria-selected="true"] {
+        background-color: """ + COLOR_PRIMARY + """;
+        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
 
-def main():
-    st.sidebar.title("Investment Analysis Suite")
-    
-    app_mode = st.sidebar.selectbox("Select Analysis Tool", 
-                                    ["Asset Return Predictor", "Investment Risk Calculator"])
-    
-    if app_mode == "Asset Return Predictor":
-        expected_return_calculator()
-    else:
-        beta_calculator()
+# App header and introduction
+st.image("https://www.svgrepo.com/show/9778/pie-chart.svg", width=100)
+st.title('Portfolio Returns Calculator')
 
-def expected_return_calculator():
-    st.title("Asset Return Predictor")
+with st.expander("📚 Learn about this tool"):
+    st.markdown("""
+    ### What is this tool?
+    This calculator helps investors estimate expected returns for stocks based on their market risk. It uses the **Capital Asset Pricing Model (CAPM)**, a foundational concept in modern finance theory.
+    
+    ### How does it work?
+    1. **Beta calculation**: The tool calculates how volatile a stock is compared to the overall market (S&P 500).
+    2. **Expected return**: Using beta, it estimates what return you might expect for taking on that level of risk.
+    
+    ### Key terms:
+    - **Beta**: Measures a stock's volatility compared to the market. A beta of 1 means the stock moves with the market.
+    - **Expected Return**: The estimated return of an investment based on its risk level.
+    - **S&P 500**: An index of 500 large US companies, often used as a benchmark for the overall market.
+    
+    ### How to use this tool:
+    - Select stocks you're interested in analyzing
+    - Choose a time period (in years)
+    - Review the calculated beta and expected returns
+    """)
+
+# Function to plot interactive plot with custom styling
+def interactive_plot(df):
+    fig = px.line()
+    colors = [COLOR_PRIMARY, COLOR_SECONDARY, COLOR_ACCENT, "#6E7582", "#4C8BF5", "#2C4770"]
+    
+    for i, col in enumerate(df.columns[1:]):
+        color_idx = i % len(colors)
+        fig.add_scatter(x=df['Date'], y=df[col], name=col, line=dict(color=colors[color_idx]))
+    
+    fig.update_layout(
+        width=450,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        plot_bgcolor=PLOT_BG,
+        paper_bgcolor=PLOT_BG,
+        font=dict(color=COLOR_TEXT_DARK)
+    )
+    return fig
+
+# Function to normalize the prices based on the initial price
+def normalize(df):
+    x = df.copy()
+    for i in x.columns[1:]:
+        x[i] = x[i] / x[i][0]
+    return x
+
+# Function to calculate the daily returns 
+def daily_return(df):
+    df_daily_return = df.copy()
+    for i in df.columns[1:]:
+        for j in range(1, len(df)):
+            df_daily_return[i][j] = ((df[i][j] - df[i][j-1]) / df[i][j-1]) * 100
+        df_daily_return[i][0] = 0
+    return df_daily_return
+
+# Function to calculate beta
+def calculate_beta(stocks_daily_return, stock):
+    # Fit a polynomial between the stock and the S&P500
+    b, a = np.polyfit(stocks_daily_return['sp500'], stocks_daily_return[stock], 1)
+    return b, a
+
+def get_sp500_data(start_date, end_date):
+    try:
+        # Try using pandas-datareader first
+        SP500 = web.DataReader(['sp500'], 'fred', start_date, end_date)
+        SP500.reset_index(inplace=True)
+        SP500.columns = ['Date', 'sp500']
+        return SP500
+    except Exception as e:
+        st.warning("Couldn't fetch S&P500 data from FRED. Using ^GSPC from Yahoo Finance instead.")
+        # Use ^GSPC from Yahoo Finance as a fallback
+        sp_data = yf.download('^GSPC', start=start_date, end=end_date)
+        sp_data = sp_data[['Close']].reset_index()
+        sp_data.columns = ['Date', 'sp500']
+        return sp_data
+
+# Create tabs for the two different calculators
+tab1, tab2 = st.tabs(["📊 Portfolio Analysis", "📈 Single Stock Analysis"])
+
+# Tab 1: Capital Asset Pricing Model for multiple stocks
+with tab1:
+    st.header('Portfolio Risk & Return Analysis')
     
     st.markdown("""
-    <div class="info-box">
-        <h3>What is this tool?</h3>
-        <p>The Asset Return Predictor helps you estimate the expected return of an investment based on 
-        market risk factors using the Capital Asset Pricing Model (CAPM). This tool is valuable for:</p>
-        <ul>
-            <li>Evaluating if an investment offers adequate returns for its risk</li>
-            <li>Comparing different investment opportunities</li>
-            <li>Setting reasonable return expectations for your portfolio</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Input Parameters")
-        rf = st.number_input("Risk-free Rate (%)", min_value=0.0, max_value=20.0, value=3.0, step=0.1)
-        market_return = st.number_input("Expected Market Return (%)", min_value=0.0, max_value=30.0, value=8.0, step=0.1)
-        beta = st.number_input("Asset Beta (β)", min_value=-2.0, max_value=5.0, value=1.2, step=0.01)
-        
-    with col2:
-        st.subheader("Results")
-        if st.button("Calculate Expected Return"):
-            rf_decimal = rf / 100
-            market_return_decimal = market_return / 100
-            
-            # CAPM formula: Expected Return = Risk-free Rate + Beta * (Expected Market Return - Risk-free Rate)
-            expected_return = rf_decimal + beta * (market_return_decimal - rf_decimal)
-            expected_return_percentage = expected_return * 100
-            
-            st.markdown(f"""
-            <div class="key-metric">
-                <h3>Expected Return: {expected_return_percentage:.2f}%</h3>
-                <p>Based on:</p>
-                <ul>
-                    <li>Risk-free rate: {rf:.2f}%</li>
-                    <li>Market risk premium: {(market_return - rf):.2f}%</li>
-                    <li>Asset beta (β): {beta:.2f}</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Visualization of risk-return relationship
-            st.subheader("Risk-Return Visualization")
-            fig, ax = plt.subplots(figsize=(8, 5))
-            
-            # Create data for Security Market Line
-            beta_range = np.linspace(0, 2.5, 100)
-            expected_returns = rf_decimal + beta_range * (market_return_decimal - rf_decimal)
-            
-            # Plot the Security Market Line
-            ax.plot(beta_range, expected_returns * 100, 'b-', label='Security Market Line')
-            
-            # Highlight the specified asset
-            ax.scatter([beta], [expected_return * 100], color='red', s=100, label='Your Asset')
-            
-            # Mark risk-free rate
-            ax.scatter([0], [rf], color='green', s=100, label='Risk-free Rate')
-            
-            ax.set_xlabel('Beta (Risk)')
-            ax.set_ylabel('Expected Return (%)')
-            ax.set_title('Risk-Return Trade-off')
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-            
-            st.pyplot(fig)
-    
-    # Explanation section
-    with st.expander("Learn More About Asset Return Prediction"):
-        st.markdown("""
-        ### How the Asset Return Predictor Works
-        
-        This tool uses the Capital Asset Pricing Model (CAPM), a fundamental concept in finance that helps investors:
-        
-        - **Estimate the required return** for taking on additional risk compared to a risk-free investment
-        - **Evaluate if an investment is fairly priced** based on its risk characteristics
-        
-        #### The Formula
-        Expected Return = Risk-free Rate + Beta × (Expected Market Return - Risk-free Rate)
-        
-        #### Key Components
-        
-        - **Risk-free Rate**: The return on a zero-risk investment (typically government bonds)
-        - **Beta**: Measures how much an asset's price moves compared to the overall market (β=1 means it moves exactly with the market)
-        - **Market Risk Premium**: The additional return investors expect for taking on market risk (Market Return - Risk-free Rate)
-        
-        #### Interpreting Results
-        
-        - Higher beta = Higher expected return (but also higher risk)
-        - The Security Market Line shows the risk-return tradeoff for different beta values
-        - Assets above the line may be undervalued (offering more return than their risk would suggest)
-        - Assets below the line may be overvalued (offering less return than their risk would suggest)
-        """)
+    This tool analyzes multiple stocks to calculate their risk (beta) and expected returns based on historical data.
+    """)
 
-def beta_calculator():
-    st.title("Investment Risk Calculator")
-    
-    st.markdown("""
-    <div class="info-box">
-        <h3>What is this tool?</h3>
-        <p>The Investment Risk Calculator helps you measure an asset's volatility relative to the market (Beta). 
-        This essential metric shows how much an investment tends to move in relation to the broader market, helping you:</p>
-        <ul>
-            <li>Assess the systematic risk of your investments</li>
-            <li>Build a portfolio with your desired level of market sensitivity</li>
-            <li>Make more informed decisions about diversification</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Input section
-    st.subheader("Enter Asset Information")
-    col1, col2 = st.columns(2)
-    
+    # Getting input from user
+    col1, col2 = st.columns([1, 1])
     with col1:
-        ticker = st.text_input("Asset Ticker Symbol (e.g. AAPL, MSFT)", "AAPL")
-        benchmark = st.text_input("Benchmark Index Ticker Symbol", "^GSPC")  # S&P 500 by default
-    
+        stocks_list = st.multiselect(
+            "Select up to 4 stocks for your portfolio",
+            ('TSLA', 'AAPL', 'NFLX', 'MGM', 'MSFT', 'AMZN', 'NVDA', 'GOOGL'),
+            ['TSLA', 'AAPL', 'MSFT', 'NFLX'],
+            key="stock_list",
+        )
     with col2:
-        end_date = st.date_input("End Date", date.today())
-        period = st.selectbox("Analysis Period", ["1 Year", "2 Years", "3 Years", "5 Years"])
-        
-        # Calculate start date based on period
-        if period == "1 Year":
-            start_date = end_date - timedelta(days=365)
-        elif period == "2 Years":
-            start_date = end_date - timedelta(days=730)
-        elif period == "3 Years":
-            start_date = end_date - timedelta(days=1095)
+        year = st.number_input("Analysis period (years)", 1, 10, key="multi_year")
+
+    if st.button("Analyze Portfolio", key="calc_capm"):
+        if not stocks_list:
+            st.error("Please select at least one stock to analyze.")
         else:
-            start_date = end_date - timedelta(days=1825)
+            try:
+                with st.spinner("Fetching market data..."):
+                    # Downloading data for SP500
+                    end = datetime.date.today()
+                    start = datetime.date(end.year - year, end.month, end.day)
+                    SP500 = get_sp500_data(start, end)
+
+                    # Downloading data for the stocks
+                    stocks_df = pd.DataFrame()
+                    for stock in stocks_list:
+                        data = yf.download(stock, period=f'{year}y')
+                        stocks_df[f'{stock}'] = data['Close']
+                    stocks_df.reset_index(inplace=True)
+                    
+                    stocks_df['Date'] = stocks_df['Date'].astype('datetime64[ns]')
+                    stocks_df['Date'] = stocks_df['Date'].apply(lambda x: str(x)[:10])
+                    stocks_df['Date'] = pd.to_datetime(stocks_df['Date'])
+                    
+                    # Ensure both dataframes have datetime format for Date column before merging
+                    SP500['Date'] = pd.to_datetime(SP500['Date'])
+                    
+                    # Merge dataframes
+                    stocks_df = pd.merge(stocks_df, SP500, on='Date', how='inner')
+
+                st.success("Analysis complete!")
+                
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.markdown('### Price Trends')
+                    # Plot interactive chart
+                    st.plotly_chart(interactive_plot(stocks_df), use_container_width=True)
+
+                with col2:
+                    st.markdown('### Normalized Performance')
+                    # Plot normalized interactive chart
+                    st.plotly_chart(interactive_plot(normalize(stocks_df)), use_container_width=True)
+
+                # Calculating daily return 
+                stocks_daily_return = daily_return(stocks_df)
+
+                beta = {}
+                alpha = {}
+
+                for i in stocks_daily_return.columns:
+                    # Ignoring the Date and S&P500 Columns 
+                    if i != 'Date' and i != 'sp500':
+                        # Calculate beta and alpha for all stocks
+                        b, a = calculate_beta(stocks_daily_return, i)
+                        beta[i] = b
+                        alpha[i] = a
+
+                col1, col2 = st.columns([1, 1])
+
+                # Create DataFrame properly from dictionary
+                beta_df = pd.DataFrame({
+                    'Stock': list(beta.keys()),
+                    'Beta Value': [round(i, 2) for i in beta.values()]
+                })
+
+                with col1:
+                    st.markdown('### Risk Analysis (Beta Values)')
+                    st.markdown("""
+                    **Beta interpretation:**
+                    - β > 1: More volatile than market
+                    - β = 1: Same volatility as market
+                    - β < 1: Less volatile than market
+                    """)
+                    st.dataframe(beta_df, use_container_width=True)
+
+                # Calculate return for any security using CAPM  
+                rf = 0  # Risk free rate of return
+                rm = stocks_daily_return['sp500'].mean() * 252  # Market portfolio return
+                
+                # Create DataFrame properly
+                return_df = pd.DataFrame({
+                    'Stock': list(beta.keys()),
+                    'Expected Return (%)': [round(rf + (value * (rm - rf)), 2) for value in beta.values()]
+                })
+
+                with col2:
+                    st.markdown('### Expected Returns (CAPM)')
+                    st.markdown("""
+                    Based on each stock's risk level, these are the expected annual returns according to CAPM.
+                    """)
+                    st.dataframe(return_df, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+                st.write("Please select valid stocks and years")
+
+# Tab 2: Calculate Beta for individual stock
+with tab2:
+    st.header('Single Stock Risk Analysis')
     
-    # Process and display results
-    if st.button("Calculate Risk Profile"):
+    st.markdown("""
+    This tool analyzes an individual stock's relationship with the market to determine its risk profile and expected return.
+    """)
+
+    # Getting input from user
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        stock = st.selectbox("Select a stock to analyze", ('TSLA', 'AAPL', 'NFLX', 'MGM', 'MSFT', 'AMZN', 'NVDA', 'GOOGL'))
+    with col2:
+        year = st.number_input("Analysis period (years)", 1, 10, key="single_year")
+
+    if st.button("Analyze Stock", key="calc_beta"):
         try:
-            # Get data
-            asset_data = yf.download(ticker, start=start_date, end=end_date)
-            market_data = yf.download(benchmark, start=start_date, end=end_date)
+            with st.spinner("Analyzing market data..."):
+                # Downloading data for SP500
+                end = datetime.date.today()
+                start = datetime.date(end.year - year, end.month, end.day)
+                SP500 = get_sp500_data(start, end)
+
+                # Downloading data for the stock
+                stocks_df = yf.download(stock, period=f'{year}y')
+                stocks_df = stocks_df[['Close']]
+                stocks_df.columns = [f'{stock}']
+                stocks_df.reset_index(inplace=True)
+                
+                stocks_df['Date'] = stocks_df['Date'].astype('datetime64[ns]')
+                stocks_df['Date'] = stocks_df['Date'].apply(lambda x: str(x)[:10])
+                stocks_df['Date'] = pd.to_datetime(stocks_df['Date'])
+                
+                # Ensure both dataframes have datetime format for Date column
+                SP500['Date'] = pd.to_datetime(SP500['Date'])
+                
+                # Merge dataframes
+                stocks_df = pd.merge(stocks_df, SP500, on='Date', how='inner')
+
+                # Calculating daily return 
+                stocks_daily_return = daily_return(stocks_df)
+                
+                # Calculate beta and alpha
+                beta, alpha = calculate_beta(stocks_daily_return, stock)
+
+                # Risk free rate of return
+                rf = 0
+
+                # Market portfolio return
+                rm = stocks_daily_return['sp500'].mean() * 252
+
+                # Calculate return
+                return_value = round(rf + (beta * (rm - rf)), 2)
+
+            st.success("Analysis complete!")
             
-            # Calculate returns
-            asset_returns = asset_data['Adj Close'].pct_change().dropna()
-            market_returns = market_data['Adj Close'].pct_change().dropna()
-            
-            # Create DataFrame with both returns
-            df = pd.DataFrame({'Asset': asset_returns, 'Market': market_returns}).dropna()
-            
-            # Calculate Beta
-            covariance = df.cov().iloc[0, 1]
-            market_variance = df['Market'].var()
-            beta = covariance / market_variance
-            
-            # Calculate correlation
-            correlation = df.corr().iloc[0, 1]
-            
-            # Calculate asset volatility vs market volatility
-            asset_volatility = df['Asset'].std() * (252 ** 0.5)  # Annualized
-            market_volatility = df['Market'].std() * (252 ** 0.5)  # Annualized
-            
-            # Display results
-            col1, col2 = st.columns(2)
-            
+            # Showing results
+            col1, col2 = st.columns([1, 1])
             with col1:
+                st.markdown('### Risk Analysis')
+                
+                # Custom styling for beta value
+                beta_rounded = round(beta, 2)
+                if beta_rounded > 1.1:
+                    beta_color = "red"
+                    risk_level = "High Risk"
+                elif beta_rounded < 0.9:
+                    beta_color = "green"
+                    risk_level = "Low Risk"
+                else:
+                    beta_color = "orange"
+                    risk_level = "Medium Risk"
+                
                 st.markdown(f"""
-                <div class="key-metric">
-                    <h3>Beta (β): {beta:.2f}</h3>
-                    <p>Interpretation:</p>
-                    <ul>
-                        {"<li>Less volatile than the market</li>" if beta < 0.9 else ""}
-                        {"<li>Similar volatility to the market</li>" if 0.9 <= beta <= 1.1 else ""}
-                        {"<li>More volatile than the market</li>" if beta > 1.1 else ""}
-                    </ul>
+                <div style="background-color:#f8f9fa; padding:20px; border-radius:10px;">
+                    <h3 style="margin:0;">Beta: <span style="color:{beta_color};">{beta_rounded}</span></h3>
+                    <p>Risk level: <strong>{risk_level}</strong></p>
+                    <h3 style="margin-top:20px;">Expected Return: {return_value}%</h3>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                st.markdown(f"""
-                <div class="key-metric">
-                    <h3>Correlation with Market: {correlation:.2f}</h3>
-                    <p>How closely the asset moves with the market</p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("""
+                **What this means:**
+                - **Beta > 1**: Stock is more volatile than the market
+                - **Beta = 1**: Stock moves with the market
+                - **Beta < 1**: Stock is less volatile than the market
+                """)
             
-            with col2:
-                st.markdown(f"""
-                <div class="key-metric">
-                    <h3>Asset Volatility: {asset_volatility*100:.2f}%</h3>
-                    <p>Annualized standard deviation of returns</p>
-                </div>
-                """, unsafe_allow_html=True)
+            # Creating scatter plot with regression line
+            fig = px.scatter(stocks_daily_return, x='sp500', y=stock, 
+                             title=f"{stock} Daily Returns vs S&P500",
+                             labels={"sp500": "S&P 500 Return (%)", stock: f"{stock} Return (%)"},
+                             color_discrete_sequence=[COLOR_SECONDARY])
+            
+            fig.add_scatter(
+                x=stocks_daily_return['sp500'],
+                y=beta * stocks_daily_return['sp500'] + alpha,
+                mode='lines',
+                name='Regression Line',
+                line=dict(color=COLOR_PRIMARY, width=2)
+            )
+            
+            fig.update_layout(
+                plot_bgcolor=PLOT_BG,
+                paper_bgcolor=PLOT_BG,
+                font=dict(color=COLOR_TEXT_DARK),
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            with st.expander("How to interpret this chart"):
+                st.markdown("""
+                This scatter plot shows the relationship between daily returns of your selected stock and the market (S&P 500):
                 
-                st.markdown(f"""
-                <div class="key-metric">
-                    <h3>Market Volatility: {market_volatility*100:.2f}%</h3>
-                    <p>Annualized standard deviation of market returns</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Create visualization
-            st.subheader("Return Comparison")
-            
-            # Scatter plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.scatter(df['Market'], df['Asset'], alpha=0.5, color='#1E5C97')
-            
-            # Regression line
-            coefficients = np.polyfit(df['Market'], df['Asset'], 1)
-            line = np.poly1d(coefficients)
-            x_range = np.linspace(df['Market'].min(), df['Market'].max(), 100)
-            ax.plot(x_range, line(x_range), color='#0A3161', linewidth=2)
-            
-            # Reference line (beta = 1)
-            ax.plot(x_range, x_range, 'k--', alpha=0.3, label='β = 1.0')
-            
-            ax.set_xlabel('Market Returns')
-            ax.set_ylabel(f'{ticker} Returns')
-            ax.set_title(f'{ticker} vs {benchmark} Returns')
-            ax.grid(True, alpha=0.3)
-            ax.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
-            ax.axvline(x=0, color='gray', linestyle='-', alpha=0.3)
-            ax.legend([f'Data Points', f'Regression Line (β = {beta:.2f})', 'Market Line (β = 1.0)'])
-            
-            st.pyplot(fig)
-            
-            # Historical price chart
-            st.subheader("Historical Price Performance")
-            
-            fig2, ax2 = plt.subplots(figsize=(10, 6))
-            
-            # Normalize price data
-            asset_norm = asset_data['Adj Close'] / asset_data['Adj Close'].iloc[0]
-            market_norm = market_data['Adj Close'] / market_data['Adj Close'].iloc[0]
-            
-            ax2.plot(asset_norm, label=ticker, linewidth=2, color='#0A3161')
-            ax2.plot(market_norm, label=benchmark, linewidth=2, color='#1E5C97', alpha=0.7)
-            
-            ax2.set_title(f'Normalized Price: {ticker} vs {benchmark}')
-            ax2.set_ylabel('Normalized Price (Base=1)')
-            ax2.grid(True, alpha=0.3)
-            ax2.legend()
-            
-            st.pyplot(fig2)
+                - **Each point**: Represents one day's returns for both the stock and the market
+                - **Regression line**: Shows the average relationship between stock and market movements
+                - **Steeper line (higher beta)**: Indicates the stock tends to amplify market movements
+                - **Flatter line (lower beta)**: Indicates the stock is less responsive to market movements
+                
+                The beta value is the slope of this regression line.
+                """)
             
         except Exception as e:
-            st.error(f"Error: {e}")
-            st.warning("Please check the ticker symbols and try again. Make sure you're using valid symbols.")
-    
-    # Educational information
-    with st.expander("Learn More About Beta and Investment Risk"):
-        st.markdown("""
-        ### Understanding Beta and Investment Risk
-        
-        Beta (β) is a key measure of an investment's volatility compared to the market, helping you:
-        
-        #### Interpreting Beta Values
-        
-        - **β > 1**: More volatile than the market
-          - Example: β = 1.5 means the asset tends to move 150% for each 100% move in the market
-          - Higher potential returns but also higher risk
-        
-        - **β = 1**: Same volatility as the market
-          - Moves in tandem with market fluctuations
-        
-        - **β < 1**: Less volatile than the market
-          - Example: β = 0.7 means the asset tends to move 70% for each 100% move in the market
-          - More stability during market downturns, but potentially lower returns in bull markets
-        
-        - **Negative β**: Moves opposite to the market
-          - Rare for most stocks, but can be useful for portfolio diversification
-        
-        #### Using Beta in Your Investment Strategy
-        
-        - **Growth investors** may target high-beta stocks for greater upside potential
-        - **Conservative investors** often prefer low-beta stocks for stability
-        - **Portfolio management** uses beta to balance risk across different holdings
-        
-        #### Limitations to Consider
-        
-        - Beta is backward-looking and may not predict future performance
-        - Based on historical price movements, not fundamentals
-        - Most useful when measured over longer time periods
-        - Different benchmarks can yield different beta values
-        """)
+            st.error(f"An error occurred: {e}")
+            st.write("Please select a valid stock and year")
 
-if __name__ == "__main__":
-    main()
+# Add footer with disclaimer
+st.markdown("""---""")
+st.markdown("""
+<div style="text-align: center; color: #888888; font-size: 0.8em;">
+    <p>Disclaimer: This tool is for educational purposes only. Past performance is not indicative of future results.</p>
+</div>
+""", unsafe_allow_html=True)
